@@ -139,14 +139,18 @@ class KittiSequentialDataset(Dataset):
         self.dataset_size = 0
         self.filenames = {}  # dict: maps the sequence number to a list of scans file path
         self.idx_mapper = {}  # dict: maps a dataset idx to a seq number and the index of the current scan
-        sample_idx = 0  # sample index
+        sample_idx = 0  # sample index of idx_mapper (a counter that crosses different sequences)
         for seq_idx in self.sequences:
             seqstr = "{0:04d}".format(int(seq_idx))
             path_to_seq = os.path.join(self.dataset_path, seqstr)
             scan_path = os.path.join(path_to_seq, self.lidar_name)
             self.filenames[seq_idx] = load_files(scan_path)  # load all files path in a folder and sort
             if self.transform:
-                self.poses[seq_idx] = self.read_poses(path_to_seq)  # store poses of different scans
+                if self.dataset in {"SEKITTI", "KITTITRA", "KITTITRA_M", "APOLLO"}:
+                    self.poses[seq_idx] = self.read_kitti_poses(path_to_seq)
+                    # kitti pose: calib.txt (from lidar to camera), poses.txt (from current cam to previous cam)
+                else:
+                    self.poses[seq_idx] = self.read_poses(path_to_seq)
                 assert len(self.poses[seq_idx]) == len(self.filenames[seq_idx])
             else:
                 self.poses[seq_idx] = []
@@ -154,8 +158,8 @@ class KittiSequentialDataset(Dataset):
             # num of valid scans of current seq (we need 10 scans for prediction, so 00-08 are not valid), scan seqs begin at 09
             num_valid_scans = max(0, len(self.filenames[seq_idx]) - self.skip * (self.n_past_steps - 1))
             # Add to idx_mapper
-            for sample_idx in range(num_valid_scans):  # examp: sample index 00 -> scan index 09
-                scan_idx = self.skip * (self.n_past_steps - 1) + sample_idx
+            for idx in range(num_valid_scans):  # examp: sample index 00 -> scan index 09
+                scan_idx = self.skip * (self.n_past_steps - 1) + idx
                 self.idx_mapper[sample_idx] = (seq_idx, scan_idx)  # idx_mapper[sample_idx=0] = (seq_idx=00, scan_idx=09)
                 sample_idx += 1
             self.dataset_size += num_valid_scans
@@ -170,7 +174,10 @@ class KittiSequentialDataset(Dataset):
         to_idx = scan_idx + 1  # not included
         scan_indices = list(range(from_idx, to_idx, self.skip))  # [from_idx, to_idx)
         scan_files = self.filenames[seq_idx][from_idx : to_idx : self.skip]
-        scans_list = [self.read_point_cloud(f) for f in scan_files]
+        if self.dataset in {"SEKITTI", "KITTITRA", "KITTITRA_M", "APOLLO"}:
+            scans_list = [self.read_kitti_point_cloud(f) for f in scan_files]
+        else:
+            scans_list = [self.read_point_cloud(f) for f in scan_files]
         for i, pcd in enumerate(scans_list):
             if self.transform:  # transform to current pose
                 from_pose = self.poses[seq_idx][scan_indices[i]]
@@ -221,11 +228,17 @@ class KittiSequentialDataset(Dataset):
         past_point_clouds = random_scale_point_cloud(past_point_clouds)
         return past_point_clouds, past_labels
 
-    def read_point_cloud(self, filename):
+    def read_kitti_point_cloud(self, filename):
         """Load point clouds from .bin file"""
         point_cloud = np.fromfile(filename, dtype=np.float32)
         point_cloud = torch.tensor(point_cloud.reshape((-1, 4)))
         point_cloud = point_cloud[:, :3]
+        return point_cloud
+
+    def read_point_cloud(self, filename):
+        """Load point clouds from .bin file"""
+        point_cloud = np.fromfile(filename, dtype=np.float32)
+        point_cloud = torch.tensor(point_cloud.reshape((-1, 3)))
         return point_cloud
 
     def read_labels(self, filename):
@@ -268,7 +281,7 @@ class KittiSequentialDataset(Dataset):
         timestamped_tensor = torch.hstack([tensor, time])
         return timestamped_tensor
 
-    def read_poses(self, path_to_seq):
+    def read_kitti_poses(self, path_to_seq):
         pose_file = os.path.join(path_to_seq, self.filename_poses)
         calib_file = os.path.join(path_to_seq, "calib.txt")
         poses = np.array(load_poses(pose_file))
@@ -284,4 +297,9 @@ class KittiSequentialDataset(Dataset):
         for pose in poses:
             new_poses.append(T_velo_cam.dot(inv_frame0).dot(pose).dot(T_cam_velo))
         poses = np.array(new_poses)
+        return poses
+
+    def read_poses(self, path_to_seq):
+        pose_file = os.path.join(path_to_seq, self.filename_poses)
+        poses = np.array(load_poses(pose_file))  # from current vehicle frame to global frame
         return poses

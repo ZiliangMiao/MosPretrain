@@ -44,7 +44,6 @@ def main(config, sequences):
     transform = cfg["DATA"]["TRANSFORM"]
 
     # Load data and model for different datasets
-    data = []
     data = datasets.KittiSequentialModule(cfg)
     data.setup()
 

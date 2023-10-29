@@ -65,7 +65,95 @@ def transfer_to_bin(seq_idx):
         bin_file = os.path.join(bin_path, str(scan_idx).zfill(6) + ".bin")
         top_lidar_points.tofile(bin_file)
 
+def check_labels_to_points(seq_idx):
+    print("Transfer seq" + str(seq_idx) + " to .bin files")
+    dataset_path = "/home/mars/4DMOS/data/Waymo_M/sequences"
+    # points
+    tfrecord_path = os.path.join(dataset_path, str(seq_idx).zfill(4), "tfrecord")
+    tfrecord_file = os.listdir(tfrecord_path)[0]
+    tfrecord_file = os.path.join(tfrecord_path, tfrecord_file)
+    seq_data = tf.data.TFRecordDataset(tfrecord_file, compression_type='')
+
+    # labels
+    semantic_label_path = os.path.join(dataset_path, str(seq_idx).zfill(4), "labels")
+    semantic_label_files = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(semantic_label_path)) for f
+                            in fn]
+    semantic_label_files.sort()
+
+    for scan_idx, scan_data in enumerate(tqdm(seq_data)):
+        frame = open_dataset.Frame()
+        frame.ParseFromString(bytearray(scan_data.numpy()))  # frame has the timestamp_micros attribute
+        # load point clouds
+        range_images, camera_projections, _, range_image_top_pose = (
+            frame_utils.parse_range_image_and_camera_projection(frame))
+        frame.lasers.sort(key=lambda laser: laser.name)
+        points, _ = frame_utils.convert_range_image_to_point_cloud(
+            frame, range_images, camera_projections, range_image_top_pose)  # points contains point clouds of both 5 lidars
+
+        # points
+        all_points = np.concatenate(points, axis=0)  # register all points of five lidars
+        top_lidar_points = points[0]
+        num_top_points = top_lidar_points.shape[0]
+        num_all_points = all_points.shape[0]
+
+        # labels
+        semantic_label_file = semantic_label_files[scan_idx]
+        uint_labels = np.fromfile(semantic_label_file, dtype=np.uint32).reshape((-1)) & 0xFFFF
+        int_labels = np.fromfile(semantic_label_file, dtype=np.int32).reshape((-1)) & 0xFFFF
+        num_uint_labels = uint_labels.shape[0]
+        num_int_labels = int_labels.shape[0]
+        a = 1
+
+def num_points_in_scan0():
+    dataset_path = "/home/mars/4DMOS/data/Waymo_M/sequences"
+    num_all_points_list = []
+    num_top_points_list = []
+    num_labels_list = []
+
+    for seq_idx in range(44):
+        # points
+        tfrecord_path = os.path.join(dataset_path, str(seq_idx).zfill(4), "tfrecord")
+        tfrecord_file = os.listdir(tfrecord_path)[0]
+        tfrecord_file = os.path.join(tfrecord_path, tfrecord_file)
+        seq_data = tf.data.TFRecordDataset(tfrecord_file, compression_type='')
+        # labels
+        semantic_label_path = os.path.join(dataset_path, str(seq_idx).zfill(4), "labels")
+        semantic_label_files = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(semantic_label_path))
+                                for f
+                                in fn]
+        semantic_label_files.sort()
+
+        # points
+        for scan0_data in seq_data:
+            frame = open_dataset.Frame()
+            frame.ParseFromString(bytearray(scan0_data.numpy()))  # frame has the timestamp_micros attribute
+
+            range_images, camera_projections, _, range_image_top_pose = (
+                frame_utils.parse_range_image_and_camera_projection(frame))
+            frame.lasers.sort(key=lambda laser: laser.name)
+            points, _ = frame_utils.convert_range_image_to_point_cloud(
+                frame, range_images, camera_projections,
+                range_image_top_pose)  # points contains point clouds of both 5 lidars
+
+            all_points = np.concatenate(points, axis=0)  # register all points of five lidars
+            top_lidar_points = points[0]
+            num_top_points = top_lidar_points.shape[0]
+            num_all_points = all_points.shape[0]
+            num_top_points_list.append(num_top_points)
+            num_all_points_list.append(num_all_points)
+            break
+
+        # labels
+        semantic_label_file = semantic_label_files[0]
+        labels = np.fromfile(semantic_label_file, dtype=np.uint32).reshape((-1)) & 0xFFFF
+        num_labels = labels.shape[0]
+        num_labels_list.append(num_labels)
+    a = 1
+
+
 if __name__ == "__main__":
+    num_points_in_scan0()
+    check_labels_to_points(43)
     seqs_num = 44
     # multi-processing loop
     pool = multiprocessing.Pool(processes=44)
