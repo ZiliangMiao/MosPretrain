@@ -18,6 +18,8 @@ from mos4d.models.MinkowskiEngine.customminkunet import CustomMinkUNet
 from mos4d.models.loss import MOSLoss
 from mos4d.models.metrics import ClassificationMetrics
 
+from sklearn.metrics import confusion_matrix
+
 
 class MOSNet(LightningModule):
     def __init__(self, hparams: dict):
@@ -49,6 +51,10 @@ class MOSNet(LightningModule):
 
         # The name of the dataset used for prediction
         self.test_dataset = hparams["TEST"]["DATASET"]
+        self.test_datapath = hparams["DATASET"][self.test_dataset]["PATH"]
+        # NUSC
+        if self.test_dataset == "NUSC":
+            self.version = hparams["DATASET"]["NUSC"]["VERSION"]
 
     def getLoss(self, out: ME.TensorField, past_labels: list):
         loss = self.MOSLoss.compute_loss(out, past_labels)
@@ -117,19 +123,70 @@ class MOSNet(LightningModule):
 
         torch.cuda.empty_cache()
 
+    def getStat(self, confusion_matrix):
+        tp = np.diagonal(confusion_matrix)
+        fp = np.sum(confusion_matrix, axis=1) - tp
+        fn = np.sum(confusion_matrix, axis=0) - tp
+        return tp[1], fp[1], fn[1]
+
+    def getIoU(self, tp, fp, fn):
+        intersection = tp
+        union = tp + fp + fn + 1e-15
+        iou = intersection / union
+        return iou
+
     # func "predict_step" is called by "trainer.predict"
     def predict_step(self, batch: tuple, batch_idx: int, dataloader_idx: int = None):
-        if self.test_dataset == "SEKITTI" or "KITTITRA" or "KITTITRA_M" or "APOLLO":
+        if self.test_dataset == "NUSC":
+            sample_data_tokens, point_clouds, mos_labels = batch
+            out = self.forward(point_clouds)
+            for batch_idx in range(len(batch[0])):
+                sample_data_token = sample_data_tokens[batch_idx]
+                mos_label = mos_labels[batch_idx]
+                step = 0  # only evaluate the performance of current timestamp
+                coords = out.coordinates_at(batch_idx)
+                logits = out.features_at(batch_idx)
+
+                t = round(-step * self.dt_prediction, 3)
+                mask = coords[:, -1].isclose(torch.tensor(t))
+                masked_logits = logits[mask]
+
+                masked_logits[:, self.ignore_index] = -float("inf")  # ingore: 0, i.e., unknown or noise
+
+                pred_softmax = F.softmax(masked_logits, dim=1)
+                pred_softmax = pred_softmax.detach().cpu().numpy()
+                assert pred_softmax.shape[1] == 3
+                assert pred_softmax.shape[0] >= 0
+                sum = np.sum(pred_softmax[:, 1:3], axis=1)
+                assert np.isclose(sum, np.ones_like(sum)).all()
+                moving_confidence = pred_softmax[:, 2]
+
+                # directly output the mos label, without any bayesian strategy (do not need confidences_to_labels.py file)
+                pred_label = np.ones_like(moving_confidence, dtype=np.uint8)  # notice: dtype of nusc labels are always uint8
+                pred_label[moving_confidence > 0.5] = 2
+                # pred_label_dir = os.path.join("predictions", self.id, self.test_dataset, self.version)
+                pred_label_dir = os.path.join(self.test_datapath, "4dmos_sekitti_pred", self.version)
+                os.makedirs(pred_label_dir, exist_ok=True)
+                pred_label_file = os.path.join(pred_label_dir, sample_data_token + "_mos_pred.label")
+                pred_label.tofile(pred_label_file)
+
+                # calculate iou
+                cfs_mat = confusion_matrix(mos_label, pred_label, labels=[1, 2])
+                tp_i, fp_i, fn_i = self.getStat(cfs_mat)  # stat of current sample
+                IoU_i = self.getIoU(tp_i, fp_i, fn_i)  # IoU of moving object (class 2)
+                print("\n" + "Curr Sample IoU: " + str(IoU_i))
+
+        elif self.test_dataset == "SEKITTI" or "KITTITRA" or "KITTITRA_M" or "APOLLO":
             # torch.set_grad_enabled(True)
             meta, past_point_clouds, past_labels = batch
             out = self.forward(past_point_clouds)
-            for b in range(len(batch[0])):
-                seq, idx, past_indices = meta[b]
+            for batch_idx in range(len(batch[0])):
+                seq, idx, past_indices = meta[batch_idx]
                 path = os.path.join("predictions", self.id, self.test_dataset, "confidences", str(seq).zfill(4), str(idx).zfill(6))
                 os.makedirs(path, exist_ok=True)
                 for step in range(self.n_past_steps):
-                    coords = out.coordinates_at(b)
-                    logits = out.features_at(b)
+                    coords = out.coordinates_at(batch_idx)
+                    logits = out.features_at(batch_idx)
 
                     t = round(-step * self.dt_prediction, 3)
                     mask = coords[:, -1].isclose(torch.tensor(t))

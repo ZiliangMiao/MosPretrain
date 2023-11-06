@@ -7,8 +7,7 @@ DATA:
   TRANSFORM: True # If true, the points are pose-aligned before feeding to the model
   POSES: "poses.txt" # Name of the pose file provided in each sequence folder (OPTIONS: FastLIO2 and poses provided by dataset)
   SHUFFLE: True
-  NUM_WORKER: 4
-  DELTA_T_DATA: 0.1 # Time between scans in the dataset (0.1s for KITTI)
+  NUM_WORKER: 8
   VOXEL_SIZE: 0.1 # Used for discretization in x,y,z when creating a sparse tensor 
   SEMANTIC_CONFIG_FILE: "./config/semantic-kitti-mos.yaml" 
 
@@ -17,6 +16,7 @@ DATASET:
   SEKITTI:
     PATH: "./data/SeKITTI/sequences" # labeled by PRPonn, seq 00-21
     LIDAR_NAME: "velodyne"
+    DELTA_T_DATA: 0.1 # Time between scans in the dataset (0.1s for KITTI)
     TRAIN: [0, 1, 2, 3, 4, 5, 6, 7, 9, 10]
     VAL: [8]
     TEST: [2] # [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
@@ -38,12 +38,11 @@ DATASET:
     TRAIN: [ ]
     VAL: [ ]
     TEST: [2] # [0, 1, 2, 3, 4]
-  NUSCENES_M: # labeled by MaRS, seq ?00-09 (NOT ORG IDX)
-    PATH: "./data/nuScenes_M/sequences"
-    LIDAR_NAME: "lidar"
-    TRAIN: [ ]
-    VAL: [ ]
-    TEST: [0, 1, 2, 4, 5, 6, 7, 8, 9]
+  NUSC: # ours label
+    PATH: "/home/mars/MOS_Projects/nuScenes_MOS_Labeling/data"  # or mini_data
+    VERSION: "v1.0-trainval" # "v1.0-mini"
+    DELTA_T_DATA: 0.05 # Time between scans in the dataset (0.1s for KITTI)
+
   WAYMO_M: # labeled by MaRS, seq ?00-43 (NOT ORG IDX)
     PATH: "./data/Waymo_M/sequences"
     LIDAR_NAME: "lidar"
@@ -68,8 +67,8 @@ TRAIN:
 ##Prediction
 TEST:
   CKPT: "./ckpts/10_scans.ckpt" # path to checkpoint file (.ckpt) to do inference
-  NUM_DEVICES: 4
-  DATASET: "WAYMO_M" # "SEKITTI", "KITTITRA", "KITTITRA_M", "APOLLO", "NUSCENES_M", "WAYMO_M", "AVIA"
+  NUM_DEVICES: 1
+  DATASET: "NUSC" # "SEKITTI", "KITTITRA", "KITTITRA_M", "APOLLO", "NUSC", "WAYMO_M", "AVIA"
   PRED_PATH: "./predictions" # /predictions/ID/confidences(labels)/seq/idx
   STRATEGY: "wo_bayes" # Options: ["non-overlapping", "wo_bayes", "bayes"], do not use non-overlapping, it is super stupid, nobody will do things like this
   BAYES_PRIOR: 0.5 # Moving prior for bayesian fusing
@@ -77,5 +76,5 @@ TEST:
 
 ##Network
 MODEL:
-  DELTA_T_PREDICTION: 0.1 # Temporal resolution of scans
+  DELTA_T_PREDICTION: 0.05 # Temporal resolution of scans
   N_PAST_STEPS: 10

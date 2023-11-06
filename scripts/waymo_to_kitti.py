@@ -87,17 +87,30 @@ def check_labels_to_points(seq_idx):
         range_images, camera_projections, _, range_image_top_pose = (
             frame_utils.parse_range_image_and_camera_projection(frame))
         frame.lasers.sort(key=lambda laser: laser.name)
-        points, _ = frame_utils.convert_range_image_to_point_cloud(
-            frame, range_images, camera_projections, range_image_top_pose)  # points contains point clouds of both 5 lidars
+        # double returns
+        points_0, cp_points_0 = frame_utils.convert_range_image_to_point_cloud(
+            frame, range_images, camera_projections, range_image_top_pose,
+            ri_index=0)  # points contains point clouds of both 5 lidars
+        points_1, cp_points_1 = frame_utils.convert_range_image_to_point_cloud(
+            frame, range_images, camera_projections, range_image_top_pose,
+            ri_index=1)  # points contains point clouds of both 5 lidars
+
+        top_points_0 = points_0[0]
+        top_points_1 = points_1[0]
+
+        all_points_0 = np.concatenate(points_0, axis=0)
+        all_points_1 = np.concatenate(points_1, axis=0)
+
+        all_points = np.concatenate([all_points_0, all_points_1], axis=0)  # register all points of five lidars
 
         # points
-        all_points = np.concatenate(points, axis=0)  # register all points of five lidars
-        top_lidar_points = points[0]
+        top_lidar_points = np.concatenate([top_points_0, top_points_1], axis=0)  # double returns, top lidar points
         num_top_points = top_lidar_points.shape[0]
         num_all_points = all_points.shape[0]
 
         # labels
         semantic_label_file = semantic_label_files[scan_idx]
+        labels = np.fromfile(semantic_label_file, dtype=np.uint32)
         uint_labels = np.fromfile(semantic_label_file, dtype=np.uint32).reshape((-1)) & 0xFFFF
         int_labels = np.fromfile(semantic_label_file, dtype=np.int32).reshape((-1)) & 0xFFFF
         num_uint_labels = uint_labels.shape[0]
@@ -150,9 +163,13 @@ def num_points_in_scan0():
         num_labels_list.append(num_labels)
     a = 1
 
+def read_bin_file(filename):
+    """Load point clouds from .bin file"""
+    point_cloud = np.fromfile(filename, dtype=np.float32).reshape((-1, 4))
+    point_cloud = point_cloud[:, :3]
+    return point_cloud
 
 if __name__ == "__main__":
-    num_points_in_scan0()
     check_labels_to_points(43)
     seqs_num = 44
     # multi-processing loop
