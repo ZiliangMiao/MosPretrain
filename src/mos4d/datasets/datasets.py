@@ -126,7 +126,7 @@ class KittiSequentialDataset(Dataset):
 
         # Check if data and prediction frequency matches
         self.dt_pred = self.cfg["MODEL"]["DELTA_T_PREDICTION"]  # time resolution used for prediction
-        self.dt_data = self.cfg["DATA"]["DELTA_T_DATA"]  # minimum time resolution of lidar scans
+        self.dt_data = self.cfg["DATASET"][self.dataset]["DELTA_T_DATA"]  # minimum time resolution of lidar scans
         assert (
             self.dt_pred >= self.dt_data
         ), "DELTA_T_PREDICTION needs to be larger than DELTA_T_DATA!"

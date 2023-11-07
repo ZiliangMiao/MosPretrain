@@ -44,6 +44,8 @@ class MOSNet(LightningModule):
 
         self.ClassificationMetrics = ClassificationMetrics(self.n_classes, self.ignore_index)
 
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
         # The name of the dataset used for prediction
         self.test_dataset = hparams["TEST"]["DATASET"]
         self.test_datapath = hparams["DATASET"][self.test_dataset]["PATH"]
@@ -73,13 +75,13 @@ class MOSNet(LightningModule):
             dict_confusion_matrix[s] = (
                 self.get_step_confusion_matrix(out, past_labels, s).detach().cpu()
             )
-
+        self.training_step_outputs.append({"loss": loss, "dict_confusion_matrix": dict_confusion_matrix})
         torch.cuda.empty_cache()
         return {"loss": loss, "dict_confusion_matrix": dict_confusion_matrix}
 
-    def on_train_epoch_end(self, training_step_outputs):
+    def on_train_epoch_end(self):
         list_dict_confusion_matrix = [
-            output["dict_confusion_matrix"] for output in training_step_outputs
+            output["dict_confusion_matrix"] for output in self.training_step_outputs
         ]
         for s in range(self.n_past_steps):
             agg_confusion_matrix = torch.zeros(self.n_classes, self.n_classes)
@@ -104,14 +106,14 @@ class MOSNet(LightningModule):
             dict_confusion_matrix[s] = (
                 self.get_step_confusion_matrix(out, past_labels, s).detach().cpu()
             )
-
+        self.validation_step_outputs.append(dict_confusion_matrix)
         torch.cuda.empty_cache()
         return dict_confusion_matrix
 
-    def on_validation_epoch_end(self, validation_step_outputs):
+    def on_validation_epoch_end(self):
         for s in range(self.n_past_steps):
             agg_confusion_matrix = torch.zeros(self.n_classes, self.n_classes)
-            for dict_confusion_matrix in validation_step_outputs:
+            for dict_confusion_matrix in self.validation_step_outputs:
                 agg_confusion_matrix = agg_confusion_matrix.add(dict_confusion_matrix[s])
             iou = self.ClassificationMetrics.getIoU(agg_confusion_matrix)
             self.log("val_moving_iou_step{}".format(s), iou[2].item())

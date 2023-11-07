@@ -1,6 +1,6 @@
 ##Experiments
 EXPT:
-  ID: "NUSC_TRAIN" # Give your logs and model a unique name, the ID should be a string
+  ID: "SEKITTI_TRAIN" # Give your logs and model a unique name, the ID should be a string
   MODE: "TRAIN" # "TRAIN", "TEST"
 
 ##Data
@@ -14,7 +14,7 @@ DATA:
 
 ##Training
 TRAIN:
-  DATASET: "NUSC" # "SEKITTI", "KITTITRA", "KITTITRA_M", "APOLLO", "NUSC", "WAYMO_M", "AVIA"
+  DATASET: "SEKITTI" # "SEKITTI", "KITTITRA", "KITTITRA_M", "APOLLO", "NUSC", "WAYMO_M", "AVIA"
   NUM_DEVICES: 4 # could be integer of how many cuda devices to use, or a list that specify which devices to use [0, 1, 2, 3]
   MAX_EPOCH: 60
   LR: 0.0001
@@ -37,7 +37,7 @@ TEST:
 
 ##Network
 MODEL:
-  DELTA_T_PREDICTION: 0.05 # Temporal resolution of scans, nusc: 0.05, kitti: 0.1
+  DELTA_T_PREDICTION: 0.1 # Temporal resolution of scans, nusc: 0.05, kitti: 0.1
   N_PAST_STEPS: 10
 
 # Dataset Config

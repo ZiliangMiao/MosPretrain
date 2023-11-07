@@ -71,7 +71,7 @@ def main(config, finetune, resume):
     # Setup trainer
     trainer = Trainer(
         accelerator="gpu",
-        strategy="ddp_spawn",
+        strategy="ddp",
         devices=cfg["TRAIN"]["NUM_DEVICES"],
         logger=tb_logger,
         max_epochs=cfg["TRAIN"]["MAX_EPOCH"],
