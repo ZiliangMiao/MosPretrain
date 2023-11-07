@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# @file      models.py
-# @author    Benedikt Mersch     [mersch@igg.uni-bonn.de]
-# Copyright (c) 2022 Benedikt Mersch, all rights reserved
-
 import os
 import yaml
 

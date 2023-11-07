@@ -25,9 +25,9 @@ class NuscSequentialModule(LightningDataModule):
         """Dataloader and iterators for training, validation and test data"""
 
         ########## Point dataset splits
-        train_set = NuscSequentialDataset(self.cfg, split="train")
-        val_set = NuscSequentialDataset(self.cfg, split="val")
-        test_set = NuscSequentialDataset(self.cfg, split="val")  # no test labels, use val set as test set
+        train_set = NuscSequentialDataset(self.cfg, split=self.cfg["DATASET"]["NUSC"]["TRAIN"])
+        val_set = NuscSequentialDataset(self.cfg, split=self.cfg["DATASET"]["NUSC"]["VAL"])
+        test_set = NuscSequentialDataset(self.cfg, split=self.cfg["DATASET"]["NUSC"]["TEST"])  # no test labels, use val set as test set
 
         ########## Generate dataloaders and iterables
         self.train_loader = DataLoader(
@@ -84,9 +84,10 @@ class NuscSequentialModule(LightningDataModule):
     @staticmethod
     def collate_fn(batch):  # define how to merge a list of samples to from a mini-batch samples
         sample_data_token = [item[0] for item in batch]
-        point_cloud = [item[1] for item in batch]
-        mos_label = [item[2] for item in batch]
-        return [sample_data_token, point_cloud, mos_label]  # sample_data_token, past 4d point cloud, sample mos label
+        num_curr_pts = [item[1] for item in batch]
+        point_cloud = [item[2] for item in batch]
+        mos_label = [item[3] for item in batch]
+        return [sample_data_token, num_curr_pts, point_cloud, mos_label]  # sample_data_token, num_curr_pts, past 4d point cloud, sample mos label
 
 class NuscSequentialDataset(Dataset):
     def __init__(self, cfg, split):
@@ -138,6 +139,7 @@ class NuscSequentialDataset(Dataset):
         # sample data: concat 4d point clouds
         lidar_tokens = self.sample_lidar_tokens_dict[sample_token]
         pts_with_rela_time = []  # 4D Point Cloud (relative timestamp)
+        num_curr_pts = 0
         for ref_time_idx, lidar_token in enumerate(lidar_tokens):
             if lidar_token is None:
                 lidar_data = self.nusc.get('sample_data', lidar_tokens[0])
@@ -151,6 +153,8 @@ class NuscSequentialDataset(Dataset):
                 lidar_file = os.path.join(self.data_dir, lidar_data['filename'])
                 points = LidarPointCloud.from_file(lidar_file).points.T  # [num_pts, 4]
                 points_curr = points[:, :3]
+                if ref_time_idx == 0:
+                    num_curr_pts = len(points_curr)
             if self.transform:
                 # transform point cloud from curr pose to ref pose
                 curr_pose_token = lidar_data['ego_pose_token']
@@ -173,9 +177,9 @@ class NuscSequentialDataset(Dataset):
         # load labels
         mos_labels_dir = os.path.join(self.data_dir, "mos_labels", self.version)
         mos_label_file = os.path.join(mos_labels_dir, sample_data_token + "_mos.label")
-        mos_label = np.fromfile(mos_label_file, dtype=np.uint8)
+        mos_label = torch.tensor(np.fromfile(mos_label_file, dtype=np.uint8))
 
-        return [sample_data_token, point_cloud, mos_label]  # sample_data_token, past 4d point cloud, sample mos label
+        return [sample_data_token, num_curr_pts, point_cloud, mos_label]  # sample_data_token, past 4d point cloud, sample mos label
 
     @staticmethod
     def timestamp_tensor(tensor, time):

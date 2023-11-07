@@ -7,9 +7,10 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 
+import mos4d.models.models as models
 import mos4d.datasets.datasets as datasets
 import mos4d.datasets.nusc_dataset as nusc_dataset
-import mos4d.models.models as models
+
 
 from sklearn.metrics import confusion_matrix
 

@@ -1,0 +1,205 @@
+import os
+import yaml
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+
+from pytorch_lightning import LightningModule
+import MinkowskiEngine as ME
+
+from mos4d.models.MinkowskiEngine.customminkunet import CustomMinkUNet
+from mos4d.models.nusc_loss import MOSLoss
+from mos4d.models.metrics import ClassificationMetrics
+
+from sklearn.metrics import confusion_matrix
+
+class MOSNet(LightningModule):
+    def __init__(self, hparams: dict):
+        super().__init__()
+        self.save_hyperparameters(hparams)
+
+        self.id = self.hparams["EXPT"]["ID"]
+        self.dt_prediction = self.hparams["MODEL"]["DELTA_T_PREDICTION"]
+        self.lr = self.hparams["TRAIN"]["LR"]
+        self.lr_epoch = hparams["TRAIN"]["LR_EPOCH"]
+        self.lr_decay = hparams["TRAIN"]["LR_DECAY"]
+        self.weight_decay = hparams["TRAIN"]["WEIGHT_DECAY"]
+        self.n_past_steps = hparams["MODEL"]["N_PAST_STEPS"]
+
+        self.n_classes = 3  # 0 -> unknown, 1 -> static, 2 -> moving
+        self.ignore_index = [0]  # ignore unknown class when calculating scores
+
+        # need to change, kitti and nusc
+        self.poses = (
+            self.hparams["DATA"]["POSES"].split(".")[0]
+            if self.hparams["DATA"]["TRANSFORM"]
+            else "no_poses"
+        )
+
+        self.model = MOSModel(hparams, self.n_classes)
+        self.MOSLoss = MOSLoss(self.n_classes, self.ignore_index)
+        self.ClassificationMetrics = ClassificationMetrics(self.n_classes, self.ignore_index)
+
+        # init
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
+
+        # Prediction
+        self.test_dataset = hparams["TEST"]["DATASET"]
+        self.test_datapath = hparams["DATASET"][self.test_dataset]["PATH"]
+        # NUSC
+        if self.test_dataset == "NUSC":
+            self.version = hparams["DATASET"]["NUSC"]["VERSION"]
+
+    def getLoss(self, out: ME.TensorField, num_curr_pts: list, mos_labels: list):
+        loss = self.MOSLoss.compute_loss(out, num_curr_pts, mos_labels)
+        return loss
+
+    def forward(self, past_point_clouds: dict):
+        out = self.model(past_point_clouds)
+        return out
+
+    def training_step(self, batch: tuple, batch_idx, dataloader_index=0):
+        sample_data_tokens, num_curr_pts, point_clouds, mos_labels = batch
+        out = self.forward(point_clouds)
+        loss = self.getLoss(out, num_curr_pts, mos_labels)
+        self.log("train_loss", loss.item(), on_step=True)
+
+        # Logging metrics
+        confusion_matrix = self.get_step_confusion_matrix(out, num_curr_pts, mos_labels).detach().cpu()
+        self.training_step_outputs.append({"loss": loss, "confusion_matrix": confusion_matrix})
+
+        torch.cuda.empty_cache()
+        return {"loss": loss, "confusion_matrix": confusion_matrix}
+
+    def on_train_epoch_end(self):
+        confusion_matrix = self.training_step_outputs[0]["confusion_matrix"]
+        iou = self.ClassificationMetrics.getIoU(confusion_matrix)
+        self.log("train_moving_iou", iou[2].item())
+        torch.cuda.empty_cache()
+
+    def validation_step(self, batch: tuple, batch_idx):
+        batch_size = len(batch[0])
+        sample_data_tokens, num_curr_pts, point_clouds, mos_labels = batch
+
+        out = self.forward(point_clouds)
+
+        loss = self.getLoss(out, num_curr_pts, mos_labels)
+        self.log("val_loss", loss.item(), batch_size=batch_size, prog_bar=True, on_epoch=True)
+
+        confusion_matrix = self.get_step_confusion_matrix(out, num_curr_pts, mos_labels).detach().cpu()
+        self.validation_step_outputs.append(confusion_matrix)
+        torch.cuda.empty_cache()
+        return confusion_matrix
+
+    def on_validation_epoch_end(self):
+        confusion_matrix = self.validation_step_outputs[0]
+        iou = self.ClassificationMetrics.getIoU(confusion_matrix)
+        self.log("val_moving_iou", iou[2].item())
+        torch.cuda.empty_cache()
+
+    def getStat(self, confusion_matrix):
+        tp = np.diagonal(confusion_matrix)
+        fp = np.sum(confusion_matrix, axis=1) - tp
+        fn = np.sum(confusion_matrix, axis=0) - tp
+        return tp[1], fp[1], fn[1]
+
+    def getIoU(self, tp, fp, fn):
+        intersection = tp
+        union = tp + fp + fn + 1e-15
+        iou = intersection / union
+        return iou
+
+    # func "predict_step" is called by "trainer.predict"
+    def predict_step(self, batch: tuple, batch_idx: int, dataloader_idx: int = None):
+        sample_data_tokens, num_curr_pts, point_clouds, mos_labels = batch
+        out = self.forward(point_clouds)
+        for batch_idx in range(len(batch[0])):
+            sample_data_token = sample_data_tokens[batch_idx]
+            mos_label = mos_labels[batch_idx]
+            step = 0  # only evaluate the performance of current timestamp
+            coords = out.coordinates_at(batch_idx)
+            logits = out.features_at(batch_idx)
+
+            t = round(-step * self.dt_prediction, 3)
+            mask = coords[:, -1].isclose(torch.tensor(t))
+            masked_logits = logits[mask]
+            masked_logits[:, self.ignore_index] = -float("inf")  # ingore: 0, i.e., unknown or noise
+
+            pred_softmax = F.softmax(masked_logits, dim=1)
+            pred_softmax = pred_softmax.detach().cpu().numpy()
+            assert pred_softmax.shape[1] == 3
+            assert pred_softmax.shape[0] >= 0
+            sum = np.sum(pred_softmax[:, 1:3], axis=1)
+            assert np.isclose(sum, np.ones_like(sum)).all()
+            moving_confidence = pred_softmax[:, 2]
+
+            # directly output the mos label, without any bayesian strategy (do not need confidences_to_labels.py file)
+            pred_label = np.ones_like(moving_confidence, dtype=np.uint8)  # notice: dtype of nusc labels are always uint8
+            pred_label[moving_confidence > 0.5] = 2
+            # pred_label_dir = os.path.join("predictions", self.id, self.test_dataset, self.version)
+            pred_label_dir = os.path.join(self.test_datapath, "4dmos_sekitti_pred", self.version)
+            os.makedirs(pred_label_dir, exist_ok=True)
+            pred_label_file = os.path.join(pred_label_dir, sample_data_token + "_mos_pred.label")
+            pred_label.tofile(pred_label_file)
+
+            # calculate iou
+            cfs_mat = confusion_matrix(mos_label, pred_label, labels=[1, 2])
+            tp_i, fp_i, fn_i = self.getStat(cfs_mat)  # stat of current sample
+            IoU_i = self.getIoU(tp_i, fp_i, fn_i)  # IoU of moving object (class 2)
+            print("\n" + "Curr Sample IoU: " + str(IoU_i))
+        torch.cuda.empty_cache()
+
+    def get_step_confusion_matrix(self, out, num_curr_pts, mos_labels):
+        pred_logits = []
+        for features, num_points in zip(out.decomposed_features, num_curr_pts):
+            features[:, self.ignore_index] = -float("inf")
+            pred_logits.append(features[0:num_points, :])
+        pred_logits = torch.cat(pred_logits, dim=0).detach().cpu()
+        gt_labels = torch.cat(mos_labels, dim=0).detach().cpu()
+        confusion_matrix = self.ClassificationMetrics.compute_confusion_matrix(pred_logits, gt_labels)
+        return confusion_matrix
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=self.lr_epoch, gamma=self.lr_decay
+        )
+        return [optimizer], [scheduler]
+
+
+#######################################
+# Modules
+#######################################
+
+
+class MOSModel(nn.Module):
+    def __init__(self, cfg: dict, n_classes: int):
+        super().__init__()
+        self.dt_prediction = cfg["MODEL"]["DELTA_T_PREDICTION"]
+        ds = cfg["DATA"]["VOXEL_SIZE"]
+        self.quantization = torch.Tensor([ds, ds, ds, self.dt_prediction])
+        self.MinkUNet = CustomMinkUNet(in_channels=1, out_channels=n_classes, D=4)
+
+    def forward(self, past_point_clouds):
+        quantization = self.quantization.type_as(past_point_clouds[0])
+
+        past_point_clouds = [
+            torch.div(point_cloud, quantization) for point_cloud in past_point_clouds
+        ]
+        features = [
+            0.5 * torch.ones(len(point_cloud), 1).type_as(point_cloud)
+            for point_cloud in past_point_clouds
+        ]
+        coords, features = ME.utils.sparse_collate(past_point_clouds, features)
+        tensor_field = ME.TensorField(features=features, coordinates=coords.type_as(features))
+
+        sparse_tensor = tensor_field.sparse()
+
+        predicted_sparse_tensor = self.MinkUNet(sparse_tensor)
+
+        out = predicted_sparse_tensor.slice(tensor_field)
+        out.coordinates[:, 1:] = torch.mul(out.coordinates[:, 1:], quantization)
+        return out
