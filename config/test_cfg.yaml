@@ -1,0 +1,62 @@
+MODE: "test"  # "train", "finetune"
+
+##Data
+DATA:
+  DATASET: "NUSC" # "SEKITTI", "KITTITRA", "KITTITRA_M", "APOLLO", "NUSC", "WAYMO_M", "AVIA"
+  TRANSFORM: True
+  SHUFFLE: False
+  VOXEL_SIZE: 0.2 # Used for discretization in x,y,z when creating a sparse tensor
+  N_PAST_STEPS: 10
+  DELTA_T_PRED: 0.05 # Temporal resolution of scans, nusc: 0.05, kitti: 0.1
+
+##Prediction
+TEST:
+  # 1.  train-100%nusc_epo-60_bs-16_vs-0.1_ss-10
+  # 2.  train-100%sekitti_epo-60_bs-4_vs-0.1_ss-10
+  # 3.  train-100%sekitti_epo-60_finetune-10%nusc_epo-10_bs-4
+  # 3.1 mask_train-100%sekitti_epo-60_finetune-10%nusc_epo-60_bs-16_vs-0.1_ss-10
+  # 4.  train-10%nusc_epo-10_bs-4_vs-0.1_ss-10
+  # 5.  train-100%sekitti_epo-60_finetune-5%nusc_epo-5_bs-4
+  # 6.  train-5%nusc_epo-5_bs-4_vs-0.1_ss-10
+
+  # 0.  mask_train-100%sekitti_epo-60_finetune-10%nusc_epo-60_bs-4_vs-0.1_ss-10
+  # 1.  train-100%sekitti_epo-60_finetune-10%nusc_epo-60_bs-16_vs-0.1_ss-10
+  # 4docc_100%nuscenes_vs-0.2_t-3.0_bs-1_epo-60_vs-0.2_t-0.5_bs-8_epo-120
+  MODEL_NAME: "4docc_100%nuscenes_vs-0.2_t-3.0_bs-1_epo-60_vs-0.2_t-0.5_bs-8_epo-120"
+  MODEL_VERSION: "version_0"
+  model_dataset: "10%NUSC"
+  TEST_EPOCH: 4
+  NUM_DEVICES: 1
+  BATCH_SIZE: 1
+  NUM_WORKERS: 1
+
+# Dataset Config
+DATASET:
+  SEKITTI:
+    PATH: "/home/user/Datasets/SeKITTI/sequences" # labeled by PRPonn, seq 00-21
+    SEMANTIC_CONFIG_FILE: "../config/semantic-kitti-mos.yaml"
+    POSES: "poses.txt" # Name of the pose file provided in each sequence folder (OPTIONS: FastLIO2 and poses provided by dataset)
+    LIDAR_NAME: "velodyne"
+    DELTA_T: 0.1 # Time between scans in the dataset (0.1s for KITTI)
+    TRAIN: [ 0, 1, 2, 3, 4, 5, 6, 7, 9, 10 ]
+    VAL: [ 8 ]
+    TEST: [ 8 ]
+  KITTITRA:
+    PATH: "./data/KITTITra/sequences" # labeled by PRPonn, seq 19
+    LIDAR_NAME: "velodyne"
+  KITTITRA_M:
+    PATH: "./data/KITTITra_M/sequences" # labeled by MaRS, seq 00, 01-20
+    LIDAR_NAME: "velodyne"
+  APOLLO: # labeled by PRPonn, seq 00-04
+    PATH: "./data/Apollo/sequences"
+    LIDAR_NAME: "velodyne"
+  NUSC: # ours label
+    PATH: "/home/user/Datasets/nuScenes"  # or mini_data
+    VERSION: "v1.0-trainval" # "v1.0-mini"
+    TRAIN: "train"  # "train"
+    VAL: "val"  # "val"
+    TEST: "val"  # "test"
+    DELTA_T: 0.05 # Time between scans in the dataset (0.1s for KITTI)
+  WAYMO_M: # labeled by MaRS, seq ?00-43 (NOT ORG IDX)
+    PATH: "./data/Waymo_M/sequences"
+    LIDAR_NAME: "lidar"

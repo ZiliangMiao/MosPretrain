@@ -1,0 +1,66 @@
+DATA:
+  DELTA_T_PRED: 0.05
+  N_PAST_STEPS: 10
+  SHUFFLE: true
+  TRANSFORM: true
+  VOXEL_SIZE: 0.2
+  dataset_name: NUSC
+DATASET:
+  APOLLO:
+    LIDAR_NAME: velodyne
+    PATH: ./data/Apollo/sequences
+  KITTITRA:
+    LIDAR_NAME: velodyne
+    PATH: ./data/KITTITra/sequences
+  KITTITRA_M:
+    LIDAR_NAME: velodyne
+    PATH: ./data/KITTITra_M/sequences
+  NUSC:
+    DELTA_T: 0.05
+    PATH: /home/user/Datasets/nuScenes
+    TEST: val
+    TRAIN: train
+    VAL: val
+    VERSION: v1.0-trainval
+  SEKITTI:
+    DELTA_T: 0.1
+    LIDAR_NAME: velodyne
+    PATH: /home/user/Datasets/SeKITTI/sequences
+    POSES: poses.txt
+    SEMANTIC_CONFIG_FILE: ../config/semantic-kitti-mos.yaml
+    TEST:
+    - 8
+    TRAIN:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 9
+    - 10
+    VAL:
+    - 8
+  WAYMO_M:
+    LIDAR_NAME: lidar
+    PATH: ./data/Waymo_M/sequences
+MODE: finetune
+TRAIN:
+  ACC_BATCHES: 1
+  AUGMENTATION: true
+  BATCH_SIZE: 8
+  DATA_PCT: 10
+  EGO_MASK: true
+  LR: 0.0001
+  LR_DECAY: 0.99
+  LR_EPOCH: 1
+  MAX_EPOCH: 120
+  NUM_DEVICES: 1
+  NUM_WORKERS: 12
+  PRETRAIN_METHOD: 4docc
+  PRETRAIN_MODEL: pretrain_vs-0.2_t-3.0_bs-1_epo-60_epoch=14.ckpt
+  WEIGHT_DECAY: 0.0001
+  pretrain_dataset: 100%nuscenes
+  pretrain_model_name: vs-0.2_t-3.0_bs-1_epo-60
